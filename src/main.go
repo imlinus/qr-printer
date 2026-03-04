@@ -148,31 +148,20 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleReset(w http.ResponseWriter, r *http.Request) {
-	logMsg("[System] Resetting Bluetooth for %s...\n", appConfig.MAC)
+	logMsg("[System] Kickstarting Bluetooth stack...\n")
 
-	// Step 1: Nuclear Reset of the Bluetooth service & hardware
-	logMsg("[System] RESTARTING BLUETOOTH SERVICE (Nuclear Reset)...\n")
-	exec.Command("systemctl", "restart", "bluetooth").Run()
-	time.Sleep(2 * time.Second)
-
-	logMsg("[System] Resetting HCI controller (HCI Reset)...\n")
-	exec.Command("hciconfig", "hci0", "reset").Run()
+	// Step 1: Physical radio reset
+	exec.Command("hciconfig", "hci0", "down").Run()
+	time.Sleep(1 * time.Second)
+	exec.Command("hciconfig", "hci0", "up").Run()
 	time.Sleep(1 * time.Second)
 
-	exec.Command("bluetoothctl", "power", "on").Run()
-	time.Sleep(1 * time.Second)
-
-	// Step 2: Clear any leftover cache for this MAC
-	logMsg("[System] Clearing system GATT cache for %s...\n", appConfig.MAC)
-	exec.Command("bluetoothctl", "disconnect", appConfig.MAC).Run()
+	// Step 2: Clean removal
+	logMsg("[System] Evicting %s from BlueZ cache...\n", appConfig.MAC)
 	exec.Command("bluetoothctl", "remove", appConfig.MAC).Run()
 	time.Sleep(2 * time.Second)
 
-	// Step 3: Minimal trust, no pairing (risky)
-	logMsg("[System] Trusting device...\n")
-	exec.Command("bluetoothctl", "trust", appConfig.MAC).Run()
-
-	logMsg("[System] Bluetooth stack refreshed. Ready for connection.\n")
+	logMsg("[System] Stack Refreshed. Try printing now.\n")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"success": true}`))
 }
@@ -327,12 +316,13 @@ func printBLE(pixels []byte, height int) error {
 	allChars := []string{}
 
 	for _, s := range services {
-		logMsg("[System] Scanning Service: %s\n", s.UUID().String())
+		uuid := s.UUID().String()
+		logMsg("[System] Service: %s\n", uuid)
 		chars, _ := s.DiscoverCharacteristics(nil)
 		for _, c := range chars {
 			uuidStr := strings.ToLower(c.UUID().String())
 			allChars = append(allChars, uuidStr)
-			if strings.Contains(uuidStr, "ae01") {
+			if strings.Contains(uuidStr, "ae01") || strings.Contains(uuidStr, "ae02") {
 				writeChar = c
 				foundChar = true
 				break
@@ -345,9 +335,9 @@ func printBLE(pixels []byte, height int) error {
 
 	if !foundChar {
 		out, _ := exec.Command("sh", "-c", "dmesg | grep -i bluetooth | tail -n 5").CombinedOutput()
-		logMsg("[Error] AE01 not found. Available: %v\n", strings.Join(allChars, ", "))
+		logMsg("[Error] Target characteristic not found. Available: %v\n", strings.Join(allChars, ", "))
 		logMsg("[System] Kernel Logs: %s\n", string(out))
-		return fmt.Errorf("characteristic AE01 not found")
+		return fmt.Errorf("characteristic AE01/AE02 not found")
 	}
 
 	var job []byte
