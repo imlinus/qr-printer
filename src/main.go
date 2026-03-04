@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ var (
 	appConfig = Config{MAC: "C4:76:44:3F:7F:E3"} // Default
 	logChan   = make(chan string, 10)
 	clients   = make(map[chan string]bool)
+	clientsMu sync.Mutex
 )
 
 func logMsg(format string, a ...interface{}) {
@@ -45,8 +47,14 @@ func logMsg(format string, a ...interface{}) {
 	fmt.Print(msg)
 	// Broadcast to clients
 	go func() {
+		clientsMu.Lock()
+		defer clientsMu.Unlock()
 		for c := range clients {
-			c <- msg
+			select {
+			case c <- msg:
+			default:
+				// Skip if client is full
+			}
 		}
 	}()
 }
@@ -116,10 +124,15 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	c := make(chan string)
+	c := make(chan string, 20)
+	clientsMu.Lock()
 	clients[c] = true
+	clientsMu.Unlock()
+
 	defer func() {
+		clientsMu.Lock()
 		delete(clients, c)
+		clientsMu.Unlock()
 		close(c)
 	}()
 
@@ -137,25 +150,29 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 func handleReset(w http.ResponseWriter, r *http.Request) {
 	logMsg("[System] Resetting Bluetooth for %s...\n", appConfig.MAC)
 
-	// Step 1: Remove device (forces a fresh trust/pair)
-	logMsg("[System] Removing device from BlueZ cache...\n")
-	exec.Command("bluetoothctl", "remove", appConfig.MAC).Run()
+	// Step 1: Nuclear Reset of the Bluetooth service & hardware
+	logMsg("[System] RESTARTING BLUETOOTH SERVICE (Nuclear Reset)...\n")
+	exec.Command("systemctl", "restart", "bluetooth").Run()
+	time.Sleep(2 * time.Second)
+
+	logMsg("[System] Resetting HCI controller (HCI Reset)...\n")
+	exec.Command("hciconfig", "hci0", "reset").Run()
 	time.Sleep(1 * time.Second)
 
-	// Step 2: Trust the device
-	logMsg("[System] Initiating trust for %s...\n", appConfig.MAC)
-	cmd := exec.Command("bluetoothctl", "trust", appConfig.MAC)
-	if err := cmd.Run(); err != nil {
-		logMsg("[Error] Failed to trust device: %v\n", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	exec.Command("bluetoothctl", "power", "on").Run()
+	time.Sleep(1 * time.Second)
 
-	// Step 3: Optional Pair (some printers need this to stop refusing)
-	logMsg("[System] Pairing with printer...\n")
-	exec.Command("bluetoothctl", "pair", appConfig.MAC).Run()
+	// Step 2: Clear any leftover cache for this MAC
+	logMsg("[System] Clearing system GATT cache for %s...\n", appConfig.MAC)
+	exec.Command("bluetoothctl", "disconnect", appConfig.MAC).Run()
+	exec.Command("bluetoothctl", "remove", appConfig.MAC).Run()
+	time.Sleep(2 * time.Second)
 
-	logMsg("[System] Printer trusted and paired. Ready for fresh connection.\n")
+	// Step 3: Minimal trust, no pairing (risky)
+	logMsg("[System] Trusting device...\n")
+	exec.Command("bluetoothctl", "trust", appConfig.MAC).Run()
+
+	logMsg("[System] Bluetooth stack refreshed. Ready for connection.\n")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"success": true}`))
 }
@@ -279,21 +296,43 @@ func printBLE(pixels []byte, height int) error {
 	logMsg("[Printer] Connecting...\n")
 	device, err := adapter.Connect(targetAddr, bluetooth.ConnectionParams{})
 	if err != nil {
+		out, _ := exec.Command("sh", "-c", "dmesg | grep -i bluetooth | tail -n 5").CombinedOutput()
+		logMsg("[System] Kernel Error: %s\n", string(out))
 		return err
 	}
 	defer device.Disconnect()
 
-	services, err := device.DiscoverServices(nil)
+	// Wait longer for the GATT table to populate in BlueZ
+	logMsg("[Printer] Stabilizing GATT connection (2.5s)...\n")
+	time.Sleep(2500 * time.Millisecond)
+
+	var services []bluetooth.DeviceService
+	logMsg("[Printer] Requesting service discovery...\n")
+
+	// Retry discovery up to 3 times
+	for i := 0; i < 3; i++ {
+		services, err = device.DiscoverServices(nil)
+		if err == nil && len(services) > 0 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	if err != nil {
 		return err
 	}
 
 	var writeChar bluetooth.DeviceCharacteristic
 	foundChar := false
+	allChars := []string{}
+
 	for _, s := range services {
+		logMsg("[System] Scanning Service: %s\n", s.UUID().String())
 		chars, _ := s.DiscoverCharacteristics(nil)
 		for _, c := range chars {
-			if strings.Contains(strings.ToLower(c.UUID().String()), "ae01") {
+			uuidStr := strings.ToLower(c.UUID().String())
+			allChars = append(allChars, uuidStr)
+			if strings.Contains(uuidStr, "ae01") {
 				writeChar = c
 				foundChar = true
 				break
@@ -305,6 +344,9 @@ func printBLE(pixels []byte, height int) error {
 	}
 
 	if !foundChar {
+		out, _ := exec.Command("sh", "-c", "dmesg | grep -i bluetooth | tail -n 5").CombinedOutput()
+		logMsg("[Error] AE01 not found. Available: %v\n", strings.Join(allChars, ", "))
+		logMsg("[System] Kernel Logs: %s\n", string(out))
 		return fmt.Errorf("characteristic AE01 not found")
 	}
 
