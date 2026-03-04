@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Printer | Control Panel</title>
+    <style>
+        /* BASE & LAYOUT (SMACSS) */
+        :root {
+            --primary: #8a2be2;
+            --primary-glow: rgba(138, 43, 226, 0.4);
+            --bg: #0f1020;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --text: #ffffff;
+            --text-dim: rgba(255, 255, 255, 0.6);
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: radial-gradient(circle at top left, #1a1b3a, var(--bg));
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        /* MODULES */
+        .l-container {
+            width: 100%;
+            max-width: 440px;
+            padding: 20px;
+        }
+
+        .m-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        .m-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .m-header h1 {
+            font-size: 28px;
+            margin: 0;
+            background: linear-gradient(to right, #fff, var(--primary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+
+        .m-header p {
+            color: var(--text-dim);
+            margin: 8px 0 0;
+            font-size: 14px;
+        }
+
+        .m-field {
+            margin-bottom: 20px;
+        }
+
+        .m-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            color: var(--primary);
+        }
+
+        .m-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            box-sizing: border-box;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .m-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 15px var(--primary-glow);
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .m-button {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px var(--primary-glow);
+            margin-top: 10px;
+        }
+
+        .m-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--primary-glow);
+            filter: brightness(1.1);
+        }
+
+        .m-button:active {
+            transform: translateY(0);
+        }
+
+        .m-status {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            display: inline-block;
+            margin-right: 6px;
+            box-shadow: 0 0 10px #4ade80;
+        }
+
+        /* STATE */
+        .is-loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* TOOLTIP/NOTICE */
+        .notice {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: #4ade80;
+            color: #000;
+            border-radius: 10px;
+            font-weight: 600;
+            transform: translateX(200%);
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="l-container">
+        <div class="m-card" id="app">
+            <header class="m-header">
+                <h1>QR Printer</h1>
+                <p>Bluetooth Label Control</p>
+            </header>
+
+            <div class="m-field">
+                <label for="mac">Printer MAC</label>
+                <input type="text" id="mac" class="m-input" placeholder="C4:76:44:3F:7F:E3" value="C4:76:44:3F:7F:E3">
+            </div>
+
+            <div class="m-field">
+                <label for="text">QR & Footer Text</label>
+                <input type="text" id="text" class="m-input" placeholder="8441345066" value="8441345066">
+            </div>
+
+            <button class="m-button" id="printBtn">Print Label</button>
+
+            <div class="m-status">
+                <div><span class="status-dot"></span> API Online</div>
+                <div style="color: var(--text-dim)" id="apiPort">port 2030</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notice" class="notice">Print job sent!</div>
+
+    <script>
+        // StandardJS Style Guide followed
+        const apiBase = ''
+        const elements = {
+          mac: document.getElementById('mac'),
+          text: document.getElementById('text'),
+          btn: document.getElementById('printBtn'),
+          notice: document.getElementById('notice')
+        }
+
+        const showNotice = (msg, color = '#4ade80') => {
+          elements.notice.textContent = msg
+          elements.notice.style.background = color
+          elements.notice.style.transform = 'translateX(0)'
+          setTimeout(() => {
+            elements.notice.style.transform = 'translateX(200%)'
+          }, 3000)
+        }
+
+        const printLabel = async () => {
+          const text = elements.text.value
+          const mac = elements.mac.value
+
+          if (!text) return showNotice('Please enter text', '#ff4b2b')
+
+          elements.btn.textContent = 'Printing...'
+          elements.btn.classList.add('is-loading')
+
+          try {
+            // First save the MAC to the server config
+            await fetch(`${apiBase}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mac })
+            })
+
+            // Then trigger the print
+            const res = await fetch(`${apiBase}/print?qr=${encodeURIComponent(text)}`)
+            const data = await res.json()
+
+            if (data.success) {
+              showNotice('Label Printed Successfully!')
+            } else {
+              showNotice(data.error || 'Print Failed', '#ff4b2b')
+            }
+          } catch (err) {
+            showNotice('Server unreachable', '#ff4b2b')
+          } finally {
+            elements.btn.textContent = 'Print Label'
+            elements.btn.classList.remove('is-loading')
+          }
+        }
+
+        // Initialize
+        fetch(`${apiBase}/config`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.mac) elements.mac.value = data.mac
+          })
+
+        elements.btn.addEventListener('click', printLabel)
+    </script>
+</body>
+</html>

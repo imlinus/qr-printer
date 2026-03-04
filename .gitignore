@@ -1,0 +1,11 @@
+# Binaries
+build/
+*.exe
+qr-printer-bin
+
+# Configuration
+config.json
+
+# OS specific
+.DS_Store
+.thumbs.db
