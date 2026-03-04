@@ -26,13 +26,11 @@ Double-click `qr-printer-windows.exe`. The application runs in the background. A
 
 ## API Reference
 
-### Print QR
-`GET /print?qr=<text>`
-Returns JSON success/error.
-
-### Configuration
-`GET /config` - View current MAC address.
-`POST /config` - Set new MAC address (JSON body: `{"mac": "XX:XX:XX:XX:XX:XX"}`).
+| Endpoint | Method | Description | Payload |
+| :--- | :--- | :--- | :--- |
+| `/print` | `GET` | Print a QR code | `?qr=text` |
+| `/config` | `GET` | View current MAC address | N/A |
+| `/config` | `POST` | Update printer MAC address | `{"mac": "XX:XX:XX:XX:XX:XX"}` |
 
 ## Building
 To build binaries for all supported platforms, run the packaging script:
