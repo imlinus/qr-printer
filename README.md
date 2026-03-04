@@ -11,15 +11,17 @@ It only prints QR codes right now (since that what I use them for).
 
 ## Usage
 
+Download the latest version for your platform from the [Releases](https://github.com/imlinus/qr-printer/releases) page.
+
 ### Linux
-To run the application:
+Run the binary:
 ```bash
-./build/qr-printer-linux
+./qr-printer-linux
 ```
 Access the dashboard at http://localhost:2030
 
 ### Windows
-Double-click qr-printer-windows.exe. The application runs in the background. Access the control panel via a browser at http://localhost:2030
+Double-click `qr-printer-windows.exe`. The application runs in the background. Access the control panel via a browser at http://localhost:2030
 (Untested, I only have Linux)
 
 ## API Reference
