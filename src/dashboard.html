@@ -133,14 +133,25 @@
             font-size: 13px;
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #4ade80;
-            display: inline-block;
-            margin-right: 6px;
-            box-shadow: 0 0 10px #4ade80;
+        .m-button--secondary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-dim);
+            box-shadow: none;
+            font-size: 13px;
+        }
+
+        .m-button--secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .m-actions {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 12px;
+            margin-top: 10px;
         }
 
         /* STATE */
@@ -152,6 +163,46 @@
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+
+        .m-console {
+            margin-top: 25px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 15px;
+            font-family: 'MesloLGS NF', 'Consolas', monospace;
+            font-size: 11px;
+            color: #4ade80;
+            max-height: 120px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        .m-console::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .m-console::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+        }
+
+        .m-console__line {
+            opacity: 0.8;
+            margin-bottom: 4px;
+            animation: slideInLeft 0.3s ease-out;
+        }
+
+        .m-console__line.is-error {
+            color: #ff4b2b;
+            font-weight: bold;
+        }
+
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 0.8; transform: translateX(0); }
         }
 
         /* TOOLTIP/NOTICE */
@@ -187,7 +238,14 @@
                 <input type="text" id="text" class="m-input" placeholder="8441345066" value="8441345066">
             </div>
 
-            <button class="m-button" id="printBtn">Print Label</button>
+            <div class="m-actions">
+                <button class="m-button" id="printBtn">Print Label</button>
+                <button class="m-button m-button--secondary" id="resetBtn">Repair BT</button>
+            </div>
+
+            <div class="m-console" id="console">
+                <div class="m-console__line">> Waiting for logs...</div>
+            </div>
 
             <div class="m-status">
                 <div><span class="status-dot"></span> API Online</div>
@@ -199,13 +257,34 @@
     <div id="notice" class="notice">Print job sent!</div>
 
     <script>
-        // StandardJS Style Guide followed
         const apiBase = ''
         const elements = {
           mac: document.getElementById('mac'),
           text: document.getElementById('text'),
           btn: document.getElementById('printBtn'),
-          notice: document.getElementById('notice')
+          resetBtn: document.getElementById('resetBtn'),
+          notice: document.getElementById('notice'),
+          console: document.getElementById('console')
+        }
+
+        const addLog = (msg) => {
+          const line = document.createElement('div')
+          line.className = 'm-console__line'
+          if (msg.includes('[Error]')) {
+            line.classList.add('is-error')
+          }
+          line.textContent = `> ${msg}`
+          elements.console.appendChild(line)
+          elements.console.scrollTop = elements.console.scrollHeight
+        }
+
+        // Connect to log stream
+        const eventSource = new EventSource('/events')
+        eventSource.onmessage = (e) => {
+          if (e.data) addLog(e.data)
+        }
+        eventSource.onerror = () => {
+          console.log('EventSource failed. Reconnecting...')
         }
 
         const showNotice = (msg, color = '#4ade80') => {
@@ -258,7 +337,20 @@
             if (data.mac) elements.mac.value = data.mac
           })
 
+        const repairBT = async () => {
+          elements.resetBtn.textContent = '...'
+          try {
+            const res = await fetch(`${apiBase}/reset`)
+            if (res.ok) showNotice('Printer connection repaired!')
+          } catch (err) {
+            showNotice('Failed to reset', '#ff4b2b')
+          } finally {
+            elements.resetBtn.textContent = 'Repair BT'
+          }
+        }
+
         elements.btn.addEventListener('click', printLabel)
+        elements.resetBtn.addEventListener('click', repairBT)
     </script>
 </body>
 </html>

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,20 @@ type Config struct {
 var (
 	adapter   = bluetooth.DefaultAdapter
 	appConfig = Config{MAC: "C4:76:44:3F:7F:E3"} // Default
+	logChan   = make(chan string, 10)
+	clients   = make(map[chan string]bool)
 )
+
+func logMsg(format string, a ...interface{}) {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Print(msg)
+	// Broadcast to clients
+	go func() {
+		for c := range clients {
+			c <- msg
+		}
+	}()
+}
 
 func main() {
 	loadConfig()
@@ -58,6 +72,8 @@ func main() {
 	http.HandleFunc("/", handleDashboard)
 	http.HandleFunc("/print", handlePrint)
 	http.HandleFunc("/config", handleConfig)
+	http.HandleFunc("/events", handleEvents)
+	http.HandleFunc("/reset", handleReset)
 
 	port := "2030"
 	fmt.Printf("\n🚀 [QR-Printer-Go] Dashboard Ready!\n")
@@ -95,6 +111,55 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(appConfig)
 }
 
+func handleEvents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	c := make(chan string)
+	clients[c] = true
+	defer func() {
+		delete(clients, c)
+		close(c)
+	}()
+
+	for {
+		select {
+		case msg := <-c:
+			fmt.Fprintf(w, "data: %s\n\n", strings.TrimSpace(msg))
+			w.(http.Flusher).Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func handleReset(w http.ResponseWriter, r *http.Request) {
+	logMsg("[System] Resetting Bluetooth for %s...\n", appConfig.MAC)
+
+	// Step 1: Remove device (forces a fresh trust/pair)
+	logMsg("[System] Removing device from BlueZ cache...\n")
+	exec.Command("bluetoothctl", "remove", appConfig.MAC).Run()
+	time.Sleep(1 * time.Second)
+
+	// Step 2: Trust the device
+	logMsg("[System] Initiating trust for %s...\n", appConfig.MAC)
+	cmd := exec.Command("bluetoothctl", "trust", appConfig.MAC)
+	if err := cmd.Run(); err != nil {
+		logMsg("[Error] Failed to trust device: %v\n", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 3: Optional Pair (some printers need this to stop refusing)
+	logMsg("[System] Pairing with printer...\n")
+	exec.Command("bluetoothctl", "pair", appConfig.MAC).Run()
+
+	logMsg("[System] Printer trusted and paired. Ready for fresh connection.\n")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success": true}`))
+}
+
 func handlePrint(w http.ResponseWriter, r *http.Request) {
 	qrText := r.URL.Query().Get("qr")
 	if qrText == "" {
@@ -102,7 +167,7 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("[Server] Print Request: %s\n", qrText)
+	logMsg("[Server] Print Request: %s\n", qrText)
 
 	pixels, height, err := generateImage(qrText)
 	if err != nil {
@@ -111,7 +176,7 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := printBLE(pixels, height); err != nil {
-		fmt.Printf("[Error] %v\n", err)
+		logMsg("[Error] %v\n", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -193,7 +258,7 @@ func generateImage(text string) ([]byte, int, error) {
 
 func printBLE(pixels []byte, height int) error {
 	var targetAddr bluetooth.Address
-	fmt.Printf("[Printer] Searching for %s...\n", appConfig.MAC)
+	logMsg("[Printer] Searching for %s...\n", appConfig.MAC)
 
 	found := false
 	err := adapter.Scan(func(adapter *bluetooth.Adapter, result bluetooth.ScanResult) {
@@ -211,7 +276,7 @@ func printBLE(pixels []byte, height int) error {
 		return fmt.Errorf("printer not found. Check MAC address")
 	}
 
-	fmt.Printf("[Printer] Connecting...\n")
+	logMsg("[Printer] Connecting...\n")
 	device, err := adapter.Connect(targetAddr, bluetooth.ConnectionParams{})
 	if err != nil {
 		return err
@@ -261,7 +326,7 @@ func printBLE(pixels []byte, height int) error {
 	job = append(job, makePacket(0xBD, []byte{0x0A})...)
 	job = append(job, makePacket(0xA1, []byte{0x30, 0x00})...)
 
-	fmt.Printf("[Printer] Sending %d bytes...\n", len(job))
+	logMsg("[Printer] Sending %d bytes...\n", len(job))
 	mtu := 123
 	for i := 0; i < len(job); i += mtu {
 		end := i + mtu
@@ -272,7 +337,7 @@ func printBLE(pixels []byte, height int) error {
 		time.Sleep(6 * time.Millisecond)
 	}
 
-	fmt.Println("[Printer] Success")
+	logMsg("[Printer] Success\n")
 	return nil
 }
 
