@@ -28,28 +28,53 @@
         }
 
         /* MODULES */
-        .l-container {
+        .container {
             width: 100%;
-            max-width: 440px;
+            max-width: 900px;
             padding: 20px;
         }
 
-        .m-card {
+        .card {
             background: var(--card-bg);
             backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 24px;
-            padding: 40px;
+            padding: 0;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
             animation: fadeIn 0.8s ease-out;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            align-items: stretch;
+            overflow: hidden;
         }
 
-        .m-header {
+        @media (max-width: 768px) {
+            .card {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+        }
+
+        .card-left {
+            display: flex;
+            flex-direction: column;
+            padding: 40px;
+        }
+
+        .card-right {
+            display: flex;
+            flex-direction: column;
+            min-height: 250px;
+            background: rgba(0, 0, 0, 0.4);
+            border-left: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .header {
             text-align: center;
             margin-bottom: 30px;
         }
 
-        .m-header h1 {
+        .header h1 {
             font-size: 28px;
             margin: 0;
             background: linear-gradient(to right, #fff, var(--primary));
@@ -59,17 +84,17 @@
             font-weight: 800;
         }
 
-        .m-header p {
+        .header p {
             color: var(--text-dim);
             margin: 8px 0 0;
             font-size: 14px;
         }
 
-        .m-field {
+        .field {
             margin-bottom: 20px;
         }
 
-        .m-field label {
+        .field label {
             display: block;
             font-size: 12px;
             font-weight: 600;
@@ -79,7 +104,7 @@
             color: var(--primary);
         }
 
-        .m-input {
+        .input {
             width: 100%;
             padding: 12px 16px;
             background: rgba(255, 255, 255, 0.03);
@@ -91,14 +116,14 @@
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        .m-input:focus {
+        .input:focus {
             outline: none;
             border-color: var(--primary);
             box-shadow: 0 0 15px var(--primary-glow);
             background: rgba(255, 255, 255, 0.07);
         }
 
-        .m-button {
+        .button {
             width: 100%;
             padding: 14px;
             background: var(--primary);
@@ -113,27 +138,17 @@
             margin-top: 10px;
         }
 
-        .m-button:hover {
+        .button:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px var(--primary-glow);
             filter: brightness(1.1);
         }
 
-        .m-button:active {
+        .button:active {
             transform: translateY(0);
         }
 
-        .m-status {
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 13px;
-        }
-
-        .m-button--secondary {
+        .button.is-secondary {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
             color: var(--text-dim);
@@ -141,13 +156,13 @@
             font-size: 13px;
         }
 
-        .m-button--secondary:hover {
+        .button.is-secondary:hover {
             background: rgba(255, 255, 255, 0.1);
             color: white;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
 
-        .m-actions {
+        .actions {
             display: grid;
             grid-template-columns: 2fr 1fr;
             gap: 12px;
@@ -165,37 +180,36 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        .m-console {
-            margin-top: 25px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 15px;
+        .console {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 40px 40px 40px 30px;
+
             font-family: 'MesloLGS NF', 'Consolas', monospace;
             font-size: 11px;
             color: #4ade80;
-            max-height: 120px;
             overflow-y: auto;
             white-space: pre-wrap;
             line-height: 1.4;
         }
 
-        .m-console::-webkit-scrollbar {
+        .console::-webkit-scrollbar {
             width: 4px;
         }
 
-        .m-console::-webkit-scrollbar-thumb {
+        .console::-webkit-scrollbar-thumb {
             background: rgba(255,255,255,0.1);
             border-radius: 2px;
         }
 
-        .m-console__line {
+        .console-line {
             opacity: 0.8;
             margin-bottom: 4px;
             animation: slideInLeft 0.3s ease-out;
         }
 
-        .m-console__line.is-error {
+        .console-line.is-error {
             color: #ff4b2b;
             font-weight: bold;
         }
@@ -221,35 +235,34 @@
     </style>
 </head>
 <body>
-    <div class="l-container">
-        <div class="m-card" id="app">
-            <header class="m-header">
-                <h1>QR Printer</h1>
-                <p>Bluetooth Label Control</p>
-            </header>
+    <div class="container">
+        <div class="card" id="app">
+            <div class="card-left">
+                <header class="header">
+                    <h1>QR Printer</h1>
+                    <p>X6/X6h bluetooth printer</p>
+                </header>
 
-            <div class="m-field">
-                <label for="mac">Printer MAC</label>
-                <input type="text" id="mac" class="m-input" placeholder="C4:76:44:3F:7F:E3" value="C4:76:44:3F:7F:E3">
+                <div class="field">
+                    <label for="mac">Printer MAC</label>
+                    <input type="text" id="mac" class="input" placeholder="c4:76:44:3f:7f:e3" value="c4:76:44:3f:7f:e3">
+                </div>
+
+                <div class="field">
+                    <label for="text">QR</label>
+                    <input type="text" id="text" class="input" placeholder="" value="">
+                </div>
+
+                <div class="actions" style="margin-bottom: 25px;">
+                    <button class="button" id="printBtn">Print</button>
+                    <button class="button is-secondary" id="resetBtn">Pair</button>
+                </div>
             </div>
-
-            <div class="m-field">
-                <label for="text">QR & Footer Text</label>
-                <input type="text" id="text" class="m-input" placeholder="8441345066" value="8441345066">
-            </div>
-
-            <div class="m-actions">
-                <button class="m-button" id="printBtn">Print Label</button>
-                <button class="m-button m-button--secondary" id="resetBtn">Repair BT</button>
-            </div>
-
-            <div class="m-console" id="console">
-                <div class="m-console__line">> Waiting for logs...</div>
-            </div>
-
-            <div class="m-status">
-                <div><span class="status-dot"></span> API Online</div>
-                <div style="color: var(--text-dim)" id="apiPort">port 2030</div>
+            
+            <div class="card-right">
+                <div class="console" id="console">
+                    <div class="console-line">> Waiting for logs...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -269,10 +282,12 @@
 
         const addLog = (msg) => {
           const line = document.createElement('div')
-          line.className = 'm-console__line'
+          line.className = 'console-line'
+
           if (msg.includes('[Error]')) {
             line.classList.add('is-error')
           }
+
           line.textContent = `> ${msg}`
           elements.console.appendChild(line)
           elements.console.scrollTop = elements.console.scrollHeight
@@ -280,9 +295,11 @@
 
         // Connect to log stream
         const eventSource = new EventSource('/events')
+
         eventSource.onmessage = (e) => {
           if (e.data) addLog(e.data)
         }
+
         eventSource.onerror = () => {
           console.log('EventSource failed. Reconnecting...')
         }
@@ -291,6 +308,7 @@
           elements.notice.textContent = msg
           elements.notice.style.background = color
           elements.notice.style.transform = 'translateX(0)'
+
           setTimeout(() => {
             elements.notice.style.transform = 'translateX(200%)'
           }, 3000)
@@ -318,14 +336,14 @@
             const data = await res.json()
 
             if (data.success) {
-              showNotice('Label Printed Successfully!')
+              showNotice('Printed successfully!')
             } else {
-              showNotice(data.error || 'Print Failed', '#ff4b2b')
+              showNotice(data.error || 'Print failed', '#ff4b2b')
             }
           } catch (err) {
             showNotice('Server unreachable', '#ff4b2b')
           } finally {
-            elements.btn.textContent = 'Print Label'
+            elements.btn.textContent = 'Print'
             elements.btn.classList.remove('is-loading')
           }
         }
@@ -339,13 +357,14 @@
 
         const repairBT = async () => {
           elements.resetBtn.textContent = '...'
+
           try {
             const res = await fetch(`${apiBase}/reset`)
-            if (res.ok) showNotice('Printer connection repaired!')
+            if (res.ok) showNotice('Printer connection paired!')
           } catch (err) {
-            showNotice('Failed to reset', '#ff4b2b')
+            showNotice('Failed to pair', '#ff4b2b')
           } finally {
-            elements.resetBtn.textContent = 'Repair BT'
+            elements.resetBtn.textContent = 'Pair'
           }
         }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -17,8 +18,9 @@ import (
 	"time"
 
 	"github.com/fogleman/gg"
+	"github.com/go-ble/ble"
+	"github.com/go-ble/ble/linux"
 	"github.com/skip2/go-qrcode"
-	"tinygo.org/x/bluetooth"
 )
 
 //go:embed dashboard.html
@@ -26,7 +28,6 @@ var dashboardHTML embed.FS
 
 const (
 	ConfigFile = "config.json"
-	WriteUUID  = "0000ae01-0000-1000-8000-00805f9b34fb"
 	PaperWidth = 384
 )
 
@@ -35,17 +36,15 @@ type Config struct {
 }
 
 var (
-	adapter   = bluetooth.DefaultAdapter
-	appConfig = Config{MAC: "C4:76:44:3F:7F:E3"} // Default
-	logChan   = make(chan string, 10)
+	appConfig = Config{MAC: "c4:76:44:3f:7f:e3"}
 	clients   = make(map[chan string]bool)
 	clientsMu sync.Mutex
+	bleMu     sync.Mutex // only one BLE op at a time
 )
 
 func logMsg(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
 	fmt.Print(msg)
-	// Broadcast to clients
 	go func() {
 		clientsMu.Lock()
 		defer clientsMu.Unlock()
@@ -53,7 +52,6 @@ func logMsg(format string, a ...interface{}) {
 			select {
 			case c <- msg:
 			default:
-				// Skip if client is full
 			}
 		}
 	}()
@@ -62,12 +60,6 @@ func logMsg(format string, a ...interface{}) {
 func main() {
 	loadConfig()
 
-	// Initialize Bluetooth
-	if err := adapter.Enable(); err != nil {
-		log.Printf("Warning: bluetooth adapter failed: %v", err)
-	}
-
-	// Signal handling for clean exit
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -76,7 +68,6 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// ROUTES
 	http.HandleFunc("/", handleDashboard)
 	http.HandleFunc("/print", handlePrint)
 	http.HandleFunc("/config", handleConfig)
@@ -93,7 +84,8 @@ func main() {
 	}
 }
 
-// HANDLERS
+// --- HANDLERS ---
+
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -111,7 +103,8 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		appConfig.MAC = strings.ToUpper(newCfg.MAC)
+		// go-ble expects lowercase MAC addresses
+		appConfig.MAC = strings.ToLower(newCfg.MAC)
 		saveConfig()
 		fmt.Printf("[Config] Updated MAC to: %s\n", appConfig.MAC)
 	}
@@ -148,20 +141,12 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleReset(w http.ResponseWriter, r *http.Request) {
-	logMsg("[System] Kickstarting Bluetooth stack...\n")
-
-	// Step 1: Physical radio reset
+	logMsg("[System] Resetting Bluetooth radio...\n")
 	exec.Command("hciconfig", "hci0", "down").Run()
-	time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 	exec.Command("hciconfig", "hci0", "up").Run()
-	time.Sleep(1 * time.Second)
-
-	// Step 2: Clean removal
-	logMsg("[System] Evicting %s from BlueZ cache...\n", appConfig.MAC)
-	exec.Command("bluetoothctl", "remove", appConfig.MAC).Run()
-	time.Sleep(2 * time.Second)
-
-	logMsg("[System] Stack Refreshed. Try printing now.\n")
+	time.Sleep(500 * time.Millisecond)
+	logMsg("[System] Radio reset done. Try printing now.\n")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"success": true}`))
 }
@@ -193,7 +178,8 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"success": true}`))
 }
 
-// PRINTER LOGIC
+// --- PRINTER LOGIC ---
+
 func generateImage(text string) ([]byte, int, error) {
 	const qrSize = 320
 	q, err := qrcode.New(text, qrcode.Medium)
@@ -205,7 +191,6 @@ func generateImage(text string) ([]byte, int, error) {
 
 	const fontSize = 32
 	dc := gg.NewContext(PaperWidth, 1000)
-	// Try loading common fonts or fallback
 	fontPaths := []string{
 		"/usr/share/fonts/TTF/MesloLGS-NF-Regular.ttf",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -262,89 +247,88 @@ func generateImage(text string) ([]byte, int, error) {
 	return pixels, totalHeight, nil
 }
 
+// printBLE uses go-ble/ble which communicates via raw HCI sockets,
+// completely bypassing BlueZ. This eliminates all "No more profiles" and
+// "br-connection-refused" errors — those are BlueZ-layer problems that
+// simply do not exist at the HCI level. HCI LE_Create_Connection is
+// LE-only by definition.
 func printBLE(pixels []byte, height int) error {
-	var targetAddr bluetooth.Address
-	logMsg("[Printer] Searching for %s...\n", appConfig.MAC)
+	// go-ble takes exclusive ownership of the HCI adapter, so serialize calls.
+	bleMu.Lock()
+	defer bleMu.Unlock()
 
-	found := false
-	err := adapter.Scan(func(adapter *bluetooth.Adapter, result bluetooth.ScanResult) {
-		if strings.EqualFold(result.Address.String(), appConfig.MAC) {
-			targetAddr = result.Address
-			adapter.StopScan()
-			found = true
-		}
+	targetMAC := strings.ToLower(appConfig.MAC)
+
+	logMsg("[Printer] Initialising HCI device...\n")
+	d, err := linux.NewDevice()
+	if err != nil {
+		return fmt.Errorf("HCI init: %w (try: sudo setcap 'cap_net_raw,cap_net_admin=eip' ./qr-printer)", err)
+	}
+	ble.SetDefaultDevice(d)
+	defer d.Stop()
+
+	// ble.Connect scans (HCI_LE_Set_Scan_Enable) then connects
+	// (HCI_LE_Create_Connection) — both are LE-only HCI commands.
+	logMsg("[Printer] Scanning and connecting to %s...\n", targetMAC)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cln, err := ble.Connect(ctx, func(a ble.Advertisement) bool {
+		return strings.EqualFold(a.Addr().String(), targetMAC)
 	})
 	if err != nil {
-		return err
-	}
-
-	if !found {
-		return fmt.Errorf("printer not found. Check MAC address")
-	}
-
-	logMsg("[Printer] Connecting...\n")
-	device, err := adapter.Connect(targetAddr, bluetooth.ConnectionParams{})
-	if err != nil {
-		out, _ := exec.Command("sh", "-c", "dmesg | grep -i bluetooth | tail -n 5").CombinedOutput()
-		logMsg("[System] Kernel Error: %s\n", string(out))
-		return err
-	}
-	defer device.Disconnect()
-
-	// Wait longer for the GATT table to populate in BlueZ
-	logMsg("[Printer] Stabilizing GATT connection (2.5s)...\n")
-	time.Sleep(2500 * time.Millisecond)
-
-	var services []bluetooth.DeviceService
-	logMsg("[Printer] Requesting service discovery...\n")
-
-	// Retry discovery up to 3 times
-	for i := 0; i < 3; i++ {
-		services, err = device.DiscoverServices(nil)
-		if err == nil && len(services) > 0 {
-			break
+		if err == context.DeadlineExceeded {
+			return fmt.Errorf("printer not found after 15s — is it powered on?")
 		}
-		time.Sleep(500 * time.Millisecond)
+		return fmt.Errorf("connect: %w", err)
 	}
+	defer cln.CancelConnection()
 
+	logMsg("[Printer] Connected. Discovering GATT profile...\n")
+	p, err := cln.DiscoverProfile(true)
 	if err != nil {
-		return err
+		return fmt.Errorf("discover profile: %w", err)
 	}
 
-	var writeChar bluetooth.DeviceCharacteristic
-	foundChar := false
-	allChars := []string{}
-
-	for _, s := range services {
-		uuid := s.UUID().String()
-		logMsg("[System] Service: %s\n", uuid)
-		chars, _ := s.DiscoverCharacteristics(nil)
-		for _, c := range chars {
-			uuidStr := strings.ToLower(c.UUID().String())
-			allChars = append(allChars, uuidStr)
-			if strings.Contains(uuidStr, "ae01") || strings.Contains(uuidStr, "ae02") {
+	// Find write characteristic (AE01 or AE02).
+	var writeChar *ble.Characteristic
+	allUUIDs := []string{}
+	for _, svc := range p.Services {
+		for _, c := range svc.Characteristics {
+			uuid := strings.ToLower(c.UUID.String())
+			allUUIDs = append(allUUIDs, uuid)
+			if strings.Contains(uuid, "ae01") {
 				writeChar = c
-				foundChar = true
-				break
+				break // ae01 is the write char, ae02 is notify — stop here
 			}
 		}
-		if foundChar {
+		if writeChar != nil {
 			break
 		}
 	}
-
-	if !foundChar {
-		out, _ := exec.Command("sh", "-c", "dmesg | grep -i bluetooth | tail -n 5").CombinedOutput()
-		logMsg("[Error] Target characteristic not found. Available: %v\n", strings.Join(allChars, ", "))
-		logMsg("[System] Kernel Logs: %s\n", string(out))
-		return fmt.Errorf("characteristic AE01/AE02 not found")
+	// fallback to ae02 only if ae01 not found
+	if writeChar == nil {
+		for _, svc := range p.Services {
+			for _, c := range svc.Characteristics {
+				if strings.Contains(strings.ToLower(c.UUID.String()), "ae02") {
+					writeChar = c
+				}
+			}
+		}
 	}
 
+	if writeChar == nil {
+		logMsg("[Error] Available characteristics: %v\n", strings.Join(allUUIDs, ", "))
+		return fmt.Errorf("characteristic AE01/AE02 not found")
+	}
+	logMsg("[Printer] Using characteristic: %s\n", writeChar.UUID.String())
+
+	// Build print job.
 	var job []byte
-	job = append(job, makePacket(0xA4, []byte{0x35})...)
-	job = append(job, makePacket(0xAF, []byte{0x1C, 0x25})...)
-	job = append(job, makePacket(0xBE, []byte{0x00})...)
-	job = append(job, makePacket(0xBD, []byte{0x06})...)
+	job = append(job, makePacket(0xA4, []byte{0x33})...)       // Blackening level 3
+	job = append(job, makePacket(0xAF, []byte{0x1C, 0x25})...) // Energy 9500 (0x251C LE)
+	job = append(job, makePacket(0xBE, []byte{0x00})...)       // Mode: image
+	job = append(job, makePacket(0xBD, []byte{0x0A})...)       // Speed: img_print_speed=10
 
 	for y := 0; y < height; y++ {
 		line := pixels[y*PaperWidth : (y+1)*PaperWidth]
@@ -355,23 +339,30 @@ func printBLE(pixels []byte, height int) error {
 			job = append(job, makePacket(0xA2, packLine(line))...)
 		}
 	}
-	job = append(job, makePacket(0xBD, []byte{0x0A})...)
-	job = append(job, makePacket(0xA1, []byte{0x30, 0x00})...)
 
+	job = append(job, makePacket(0xBD, []byte{0x0A})...)       // Feed speed (end)
+	job = append(job, makePacket(0xA1, []byte{0x30, 0x00})...) // Paper type — triggers physical print
+
+	// Write in chunks. noRsp=true → WriteWithoutResponse over raw HCI.
 	logMsg("[Printer] Sending %d bytes...\n", len(job))
-	mtu := 123
+	mtu := 180                         // img_mtu from X6H spec (was 123)
+	chunkDelay := 4 * time.Millisecond // interval_ms from X6H spec (was 6ms)
 	for i := 0; i < len(job); i += mtu {
 		end := i + mtu
 		if end > len(job) {
 			end = len(job)
 		}
-		writeChar.WriteWithoutResponse(job[i:end])
-		time.Sleep(6 * time.Millisecond)
+		if err := cln.WriteCharacteristic(writeChar, job[i:end], true); err != nil {
+			return fmt.Errorf("write at offset %d: %w", i, err)
+		}
+		time.Sleep(chunkDelay)
 	}
 
 	logMsg("[Printer] Success\n")
 	return nil
 }
+
+// --- PACKET HELPERS ---
 
 func makePacket(cmd byte, payload []byte) []byte {
 	l := len(payload)
@@ -387,6 +378,7 @@ func makePacket(cmd byte, payload []byte) []byte {
 			}
 		}
 	}
+	// X6H has new_format = false, so no 0x12 prepended
 	return append(append(header, payload...), crc, 0xFF)
 }
 
@@ -439,6 +431,8 @@ func packLine(line []byte) []byte {
 	return out
 }
 
+// --- CONFIG ---
+
 func loadConfig() {
 	exe, err := os.Executable()
 	path := ConfigFile
@@ -448,6 +442,7 @@ func loadConfig() {
 	if data, err := os.ReadFile(path); err == nil {
 		json.Unmarshal(data, &appConfig)
 	}
+	appConfig.MAC = strings.ToLower(appConfig.MAC)
 }
 
 func saveConfig() {
