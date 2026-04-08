@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/color"
 	"log"
 	"net/http"
@@ -153,14 +154,16 @@ func handleReset(w http.ResponseWriter, r *http.Request) {
 
 func handlePrint(w http.ResponseWriter, r *http.Request) {
 	qrText := r.URL.Query().Get("qr")
-	if qrText == "" {
-		http.Error(w, `{"error": "Missing qr parameter"}`, http.StatusBadRequest)
+	msgText := r.URL.Query().Get("text")
+
+	if qrText == "" && msgText == "" {
+		http.Error(w, `{"error": "Missing parameters"}`, http.StatusBadRequest)
 		return
 	}
 
-	logMsg("[Server] Print Request: %s\n", qrText)
+	logMsg("[Server] Print Request: QR='%s', Text='%s'\n", qrText, msgText)
 
-	pixels, height, err := generateImage(qrText)
+	pixels, height, err := generateImage(qrText, msgText)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "%v"}`, err), http.StatusInternalServerError)
 		return
@@ -180,14 +183,24 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 
 // --- PRINTER LOGIC ---
 
-func generateImage(text string) ([]byte, int, error) {
+func generateImage(qrText, msgText string) ([]byte, int, error) {
 	const qrSize = 320
-	q, err := qrcode.New(text, qrcode.Medium)
-	if err != nil {
-		return nil, 0, err
+	var qrImg image.Image
+	var err error
+
+	if qrText != "" {
+		var q *qrcode.QRCode
+		q, err = qrcode.New(qrText, qrcode.Medium)
+		if err != nil {
+			return nil, 0, err
+		}
+		q.DisableBorder = true
+		qrImg = q.Image(qrSize)
 	}
-	q.DisableBorder = true
-	qrImg := q.Image(qrSize)
+
+	if msgText == "" && qrText != "" {
+		msgText = qrText
+	}
 
 	const fontSize = 32
 	dc := gg.NewContext(PaperWidth, 1000)
@@ -207,16 +220,32 @@ func generateImage(text string) ([]byte, int, error) {
 		fmt.Println("Warning: No system fonts found, text rendering might fail.")
 	}
 
-	lines := dc.WordWrap(text, PaperWidth-40)
+	var lines []string
+	if msgText != "" {
+		lines = dc.WordWrap(msgText, PaperWidth-40)
+	}
+
 	lineHeight := fontSize + 12
-	textHeight := len(lines)*lineHeight + 60
-	totalHeight := qrSize + textHeight + 40
+	textHeight := 0
+	if msgText != "" {
+		textHeight = len(lines)*lineHeight + 60
+	}
+
+	actualQrSize := 0
+	if qrImg != nil {
+		actualQrSize = qrSize
+	}
+
+	totalHeight := actualQrSize + textHeight + 40
+	if totalHeight < 40 {
+		totalHeight = 40
+	}
 
 	dest := gg.NewContext(PaperWidth, totalHeight)
 	dest.SetColor(color.White)
 	dest.Clear()
 
-	if fontLoaded {
+	if fontLoaded && msgText != "" {
 		for _, p := range fontPaths {
 			if err := dest.LoadFontFace(p, fontSize); err == nil {
 				break
@@ -224,9 +253,13 @@ func generateImage(text string) ([]byte, int, error) {
 		}
 	}
 
-	dest.DrawImage(qrImg, (PaperWidth-qrSize)/2, 20)
+	textStartY := 40.0
+	if qrImg != nil {
+		dest.DrawImage(qrImg, (PaperWidth-actualQrSize)/2, 20)
+		textStartY = float64(actualQrSize + 60)
+	}
+
 	dest.SetColor(color.Black)
-	textStartY := float64(qrSize + 60)
 	for i, line := range lines {
 		dest.DrawStringAnchored(line, PaperWidth/2, textStartY+float64(i*lineHeight), 0.5, 0.5)
 	}

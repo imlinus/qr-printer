@@ -1,7 +1,7 @@
 # QR Printer
 
 A thermal printer server for the cheap X6/X6H bluetooth printers found on Aliexpress.
-It only prints QR codes right now (since that what I use them for).
+It prints QR codes and multiline text.
 
 ![Dashboard Screenshot](screenshot.png)
 
@@ -30,7 +30,7 @@ Double-click `qr-printer-windows.exe`. The application runs in the background. A
 
 | Endpoint | Method | Description | Payload |
 | :--- | :--- | :--- | :--- |
-| `/print` | `GET` | Print a QR code | `?qr=text` |
+| `/print` | `GET` | Print a QR code and/or text | `?qr=url&text=message` |
 | `/config` | `GET` | View current MAC address | N/A |
 | `/config` | `POST` | Update printer MAC address | `{"mac": "XX:XX:XX:XX:XX:XX"}` |
 

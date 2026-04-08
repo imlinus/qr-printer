@@ -249,8 +249,13 @@
                 </div>
 
                 <div class="field">
-                    <label for="text">QR</label>
-                    <input type="text" id="text" class="input" placeholder="" value="">
+                    <label for="qr">QR Code</label>
+                    <input type="text" id="qr" class="input" placeholder="Optional URL or text">
+                </div>
+
+                <div class="field">
+                    <label for="text">Text Context</label>
+                    <textarea id="text" class="input" rows="3" placeholder="Optional multiline text..."></textarea>
                 </div>
 
                 <div class="actions" style="margin-bottom: 25px;">
@@ -273,6 +278,7 @@
         const apiBase = ''
         const elements = {
           mac: document.getElementById('mac'),
+          qr: document.getElementById('qr'),
           text: document.getElementById('text'),
           btn: document.getElementById('printBtn'),
           resetBtn: document.getElementById('resetBtn'),
@@ -315,10 +321,11 @@
         }
 
         const printLabel = async () => {
+          const qr = elements.qr.value
           const text = elements.text.value
           const mac = elements.mac.value
 
-          if (!text) return showNotice('Please enter text', '#ff4b2b')
+          if (!qr && !text) return showNotice('Please enter QR or text', '#ff4b2b')
 
           elements.btn.textContent = 'Printing...'
           elements.btn.classList.add('is-loading')
@@ -332,7 +339,11 @@
             })
 
             // Then trigger the print
-            const res = await fetch(`${apiBase}/print?qr=${encodeURIComponent(text)}`)
+            let url = `${apiBase}/print?`
+            if (qr) url += `qr=${encodeURIComponent(qr)}&`
+            if (text) url += `text=${encodeURIComponent(text)}`
+			
+            const res = await fetch(url)
             const data = await res.json()
 
             if (data.success) {
